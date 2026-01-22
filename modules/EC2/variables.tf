@@ -28,6 +28,11 @@ variable "vpc_id" {
   description = "ID da VPC"
 }
 
+variable "lb_security_group_id" {
+  type        = string
+  description = "ID do Security Group do Load Balancer"
+}
+
 variable "monitoring" {
   type        = bool
   description = "Habilitar monitoramento detalhado"

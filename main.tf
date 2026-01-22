@@ -19,6 +19,26 @@ module "vpc" {
 }
 
 # ==================================================
+# MÓDULO LOAD BALANCER - Distribui tráfego
+# ==================================================
+module "loadbalancer" {
+  source = "./modules/LOADBALANCER"
+
+  # Nome do Load Balancer
+  lb_name = "alb-${var.environment}"
+
+  # Rede - USA outputs do módulo VPC
+  vpc_id         = module.vpc.vpc_id           # VPC onde o LB será criado
+  public_subnets = module.vpc.public_subnets   # Subnets públicas (mínimo 2)
+
+  # Instância EC2 para registrar no Target Group
+  ec2_instance_id = module.ec2.instance_id
+
+  # Ambiente
+  environment = var.environment
+}
+
+# ==================================================
 # MÓDULO EC2 - Cria a instância
 # ==================================================
 module "ec2" {
@@ -36,6 +56,9 @@ module "ec2" {
   # Configurações de rede - USA os outputs do módulo VPC
   vpc_id    = module.vpc.vpc_id                    # ← Pega o ID da VPC criada
   subnet_id = module.vpc.public_subnets[0]         # ← Pega a primeira subnet pública
+
+  # Security Group do Load Balancer - USA output do módulo LB
+  lb_security_group_id = module.loadbalancer.lb_security_group_id
 
   # Ambiente
   environment = var.environment

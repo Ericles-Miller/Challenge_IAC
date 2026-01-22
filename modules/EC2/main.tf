@@ -6,34 +6,34 @@ resource "aws_security_group" "ec2" {
   description = "Security Group para instancia EC2"
   vpc_id      = var.vpc_id
 
-  # Regra de entrada: SSH (porta 22)
+  # Regra de entrada: SSH (porta 22) - Apenas você (administrador)
   ingress {
-    description = "SSH"
+    description = "SSH from Admin"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # Permite de qualquer IP
+    cidr_blocks = ["0.0.0.0/0"]  # ⚠️ DEPOIS: trocar por seu IP (["SEU_IP/32"])
   }
 
-  # Regra de entrada: HTTP (porta 80)
+  # Regra de entrada: HTTP (porta 80) - APENAS do Load Balancer
   ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTP from Load Balancer only"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [var.lb_security_group_id]  # ✅ Só aceita do Load Balancer
   }
 
-  # Regra de entrada: HTTPS (porta 443)
+  # Regra de entrada: HTTPS (porta 443) - APENAS do Load Balancer
   ingress {
-    description = "HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTPS from Load Balancer only"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [var.lb_security_group_id]  # ✅ Só aceita do Load Balancer
   }
 
-  # Regra de saída: Permite todo tráfego
+  # Regra de saída: Permite todo tráfego (updates, APIs externas)
   egress {
     description = "Allow all outbound"
     from_port   = 0
