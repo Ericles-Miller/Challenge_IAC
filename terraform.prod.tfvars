@@ -2,3 +2,42 @@
 environment  = "prod"
 aws_profile  = "ericles-prod"
 aws_region   = "us-east-1"
+
+# ==================================================
+# VPC e Rede
+# ==================================================
+vpc_cidr           = "10.1.0.0/16"  # CIDR diferente de dev
+availability_zones = ["us-east-1a", "us-east-1b"]
+public_subnets     = ["10.1.1.0/24", "10.1.2.0/24"]
+private_subnets    = ["10.1.10.0/24", "10.1.11.0/24"]
+enable_nat_gateway = true
+enable_vpn_gateway = false
+
+# ==================================================
+# EC2
+# ==================================================
+ec2_instance_type = "t3.medium"                     # Maior que dev (4GB RAM)
+ec2_ami_id        = "ami-0e2c8caa4b6378d8c"         # Ubuntu 22.04 LTS (us-east-1)
+ec2_key_name      = "challenge-iac-key-prod"        # Chave diferente para produção
+ec2_monitoring    = true                            # Monitoramento habilitado em prod
+
+# ==================================================
+# SEGURANÇA SSH
+# ==================================================
+# Lista vazia [] = Você gerencia os IPs SSH manualmente pelo console AWS
+ssh_allowed_ips = []
+
+# Em produção, você pode definir IPs fixos da empresa:
+# ssh_allowed_ips = [
+#   "203.0.113.0/24",  # Range da empresa
+# ]
+
+# ==================================================
+# Tags
+# ==================================================
+project_tags = {
+  Project     = "Challenge-IAC"
+  Owner       = "Ericles"
+  Environment = "Production"
+  CostCenter  = "Engineering"
+}

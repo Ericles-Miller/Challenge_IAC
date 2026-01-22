@@ -60,6 +60,9 @@ module "ec2" {
   # Security Group do Load Balancer - USA output do módulo LB
   lb_security_group_id = module.loadbalancer.lb_security_group_id
 
+  # IPs permitidos para SSH
+  ssh_allowed_ips = var.ssh_allowed_ips
+
   # Ambiente
   environment = var.environment
 

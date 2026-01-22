@@ -21,6 +21,15 @@ ec2_key_name      = "challenge-iac-key"             # Chave SSH criada
 ec2_monitoring    = false
 
 # ==================================================
+# SEGURANÇA SSH
+# ==================================================
+# Lista vazia [] = Você gerencia os IPs SSH manualmente pelo console AWS
+ssh_allowed_ips = []
+
+# Se quiser gerenciar pelo Terraform, descomente e adicione seus IPs:
+# ssh_allowed_ips = ["203.0.113.45/32"]
+
+# ==================================================
 # Tags
 # ==================================================
 project_tags = {

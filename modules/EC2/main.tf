@@ -6,13 +6,17 @@ resource "aws_security_group" "ec2" {
   description = "Security Group para instancia EC2"
   vpc_id      = var.vpc_id
 
-  # Regra de entrada: SSH (porta 22) - Apenas você (administrador)
-  ingress {
-    description = "SSH from Admin"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # ⚠️ DEPOIS: trocar por seu IP (["SEU_IP/32"])
+  # Regra de entrada: SSH (porta 22) - Gerenciada manualmente no console AWS
+  # Se ssh_allowed_ips estiver vazio, essa regra não será criada
+  dynamic "ingress" {
+    for_each = length(var.ssh_allowed_ips) > 0 ? [1] : []
+    content {
+      description = "SSH from allowed IPs"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = var.ssh_allowed_ips
+    }
   }
 
   # Regra de entrada: HTTP (porta 80) - APENAS do Load Balancer
