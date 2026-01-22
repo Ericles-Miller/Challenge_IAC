@@ -145,22 +145,92 @@ output "private_subnets" {
 ### **4. Configurar Módulo EC2**
 
 Criar `modules/EC2/main.tf`:
+
+**A) Primeiro, criar o Security Group para controlar o tráfego:**
+
 ```terraform
+# Security Group - Firewall virtual para a instância EC2
+resource "aws_security_group" "ec2" {
+  name        = "allow-ssh-http-https-${var.instance_name}"
+  description = "Security group for EC2 instance - allows SSH, HTTP and HTTPS"
+  vpc_id      = var.vpc_id
+
+  # Regra de entrada - SSH (porta 22)
+  ingress {
+    description = "SSH from anywhere"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # ⚠️ Em produção, restrinja para seu IP específico
+  }
+
+  # Regra de entrada - HTTP (porta 80)
+  ingress {
+    description = "HTTP from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Regra de entrada - HTTPS (porta 443)
+  ingress {
+    description = "HTTPS from anywhere"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Regra de saída - Permite todo tráfego de saída
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"  # -1 significa todos os protocolos
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "sg-${var.instance_name}"
+    }
+  )
+}
+```
+
+**B) Depois, criar a instância EC2 vinculando o Security Group:**
+
+```terraform
+# Instância EC2
 resource "aws_instance" "main" {
   ami                         = var.ami_id
   instance_type               = var.instance_type
   key_name                    = var.key_name
   subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = [aws_security_group.ec2.id]  # ← Vincula o Security Group
   associate_public_ip_address = true
+  monitoring                  = var.monitoring
 
-  tags = {
-    Name        = var.instance_name
-    Environment = var.environment
-  }
+  tags = merge(
+    var.tags,
+    {
+      Name        = var.instance_name
+      Environment = var.environment
+    }
+  )
 }
 ```
 
-Criar `modules/EC2/variables.tf` e `modules/EC2/outputs.tf`.
+**Importante:**
+- O Security Group **DEVE** ser criado antes da instância EC2
+- A propriedade `vpc_security_group_ids` vincula o Security Group à instância
+- Sem Security Group configurado, você NÃO conseguirá acessar a EC2 via SSH
+
+Criar `modules/EC2/variables.tf` com as variáveis `vpc_id`, `instance_name`, `instance_type`, `ami_id`, `key_name`, `subnet_id`, `monitoring`, `environment` e `tags`.
+
+Criar `modules/EC2/outputs.tf` com os outputs da instância.
 
 ### **5. Configurar Arquivo Principal**
 
@@ -350,6 +420,7 @@ Ao executar `terraform apply`, os seguintes recursos são criados na AWS:
   - Tipo: t3.small (2GB RAM, 2 vCPUs)
   - IP público atribuído automaticamente
   - Localizada em subnet pública
+  - Security Group configurado (SSH, HTTP, HTTPS)
 
 ### **Custos Estimados (us-east-1)**
 - EC2 t3.small: ~$15/mês
@@ -422,13 +493,70 @@ ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
 - Cada região tem AMIs diferentes
 - Ubuntu 22.04 LTS: ami-0e2c8caa4b6378d8c (us-east-1)
 
+### **Security Groups (Grupos de Segurança)**
+- **O que é:** Firewall virtual que controla o tráfego de entrada e saída da instância EC2
+- **Onde fica:** Anexado à instância EC2 (não à VPC)
+- **Stateful:** Se você permite tráfego de entrada, a resposta de saída é automaticamente permitida
+
+**Regras:**
+- **Ingress (Entrada):** Controla quem pode ACESSAR sua instância
+  - Exemplo: SSH (porta 22), HTTP (porta 80)
+- **Egress (Saída):** Controla para onde sua instância pode SE CONECTAR
+  - Exemplo: Acesso à internet, banco de dados
+
+**No projeto:**
+```terraform
+# Security Group criado no módulo EC2
+resource "aws_security_group" "ec2" {
+  vpc_id = var.vpc_id
+  
+  # Permite SSH de qualquer IP
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Permite HTTP
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  # Permite todo tráfego de saída
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+```
+
+**Importante:**
+- ⚠️ `0.0.0.0/0` significa "qualquer IP" - use apenas para HTTP/HTTPS
+- 🔒 Para SSH em produção, restrinja para IPs específicos: `["SEU_IP/32"]`
+- 📊 Um Security Group pode ser usado por várias instâncias
+
+**Diferença: Security Group vs Network ACL**
+
+| Security Group | Network ACL |
+|---------------|-------------|
+| Nível de instância | Nível de subnet |
+| Stateful (retorno automático) | Stateless (precisa regra de retorno) |
+| Só permite ALLOW | Permite ALLOW e DENY |
+| Avalia todas as regras | Avalia regras em ordem numérica |
+
 ---
 
 ## 🔄 Próximos Passos
 
 **Recursos a serem implementados:**
 
-1. **Security Groups** - Regras de firewall para controlar tráfego
+1. ✅ **Security Groups** - Implementado! Controla tráfego da EC2
 2. **Load Balancer** - Distribuir tráfego entre múltiplas instâncias
 3. **Auto Scaling** - Escalar automaticamente com base na demanda
 4. **Bastion Host** - Acesso seguro a recursos privados
@@ -440,6 +568,30 @@ ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
 
 ## 🛠️ Troubleshooting
 
+### Vejo 2 VPCs no Console AWS - está correto?
+**Sim! É normal ter 2 VPCs:**
+
+1. **VPC Default** (criada automaticamente pela AWS)
+   - CIDR geralmente: `172.31.0.0/16`
+   - Criada quando você criou a conta AWS
+   - Vem com subnets em todas as AZs da região
+   - **Pode deletar?** Sim, mas NÃO é recomendado
+
+2. **VPC do Projeto** (criada pelo Terraform)
+   - Nome: `vpc-dev`
+   - CIDR: `10.0.0.0/16`
+   - Gerenciada pelo Terraform
+
+**Como identificar a VPC do projeto:**
+```bash
+terraform output vpc_id
+# Resultado: "vpc-0430229f21c7d13be" (exemplo)
+```
+
+Procure este ID no Console AWS para encontrar sua VPC!
+
+---
+
 ### Erro: "InvalidAMIID.Malformed"
 **Solução:** Verifique se o AMI ID é válido para a região configurada.
 
@@ -450,6 +602,24 @@ ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
 **Solução:** Execute `terraform init -upgrade`.
 
 ### EC2 sem IP público
+
+### Não consigo conectar via SSH na EC2
+**Possíveis causas:**
+1. **Security Group não configurado:** Verifique se a porta 22 está aberta
+2. **Chave SSH incorreta:** Confirme que está usando a chave certa
+3. **IP público não atribuído:** Verifique se `associate_public_ip_address = true`
+
+**Solução:**
+```bash
+# Ver o IP público
+terraform output ec2_public_ip
+
+# Verificar Security Group no Console AWS
+# EC2 → Instância → Aba Security → Inbound rules → deve ter porta 22
+
+# Testar conexão
+ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
+```
 **Solução:** Adicione `associate_public_ip_address = true` no recurso EC2.
 
 ---
@@ -474,3 +644,4 @@ Projeto desenvolvido como parte do desafio de Infraestrutura como Código (IaC).
 ## 📄 Licença
 
 Este projeto é apenas para fins educacionais.
+![1769099923501](image/README/1769099923501.png)![1769099934426](image/README/1769099934426.png)![1769099943289](image/README/1769099943289.png)![1769099972574](image/README/1769099972574.png)
