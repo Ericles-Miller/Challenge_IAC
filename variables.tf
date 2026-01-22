@@ -42,6 +42,12 @@ variable "ec2_monitoring" {
   default     = false
 }
 
+variable "ssh_allowed_ips" {
+  type        = list(string)
+  description = "Lista de IPs permitidos para SSH. Deixe vazio [] para gerenciar manualmente no console AWS"
+  default     = []
+}
+
 # ==================================================
 # VARIÁVEIS PARA VPC E REDE
 # ==================================================

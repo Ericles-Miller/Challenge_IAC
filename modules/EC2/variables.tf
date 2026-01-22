@@ -28,6 +28,17 @@ variable "vpc_id" {
   description = "ID da VPC"
 }
 
+variable "lb_security_group_id" {
+  type        = string
+  description = "ID do Security Group do Load Balancer"
+}
+
+variable "ssh_allowed_ips" {
+  type        = list(string)
+  description = "Lista de IPs permitidos para SSH. Deixe vazio [] para gerenciar manualmente no console AWS"
+  default     = []  # Lista vazia - você gerencia pelo console
+}
+
 variable "monitoring" {
   type        = bool
   description = "Habilitar monitoramento detalhado"

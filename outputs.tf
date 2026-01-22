@@ -50,3 +50,20 @@ output "ssh_connection" {
   description = "Comando para conectar via SSH"
   value       = "ssh -i ~/.ssh/challenge-iac-key ubuntu@${module.ec2.public_ip}"
 }
+# ==================================================
+# LOAD BALANCER
+# ==================================================
+output "lb_dns_name" {
+  description = "DNS do Load Balancer (URL para acessar a aplicação)"
+  value       = module.loadbalancer.lb_dns_name
+}
+
+output "lb_url" {
+  description = "URL completa do Load Balancer"
+  value       = "http://${module.loadbalancer.lb_dns_name}"
+}
+
+output "lb_arn" {
+  description = "ARN do Load Balancer"
+  value       = module.loadbalancer.lb_arn
+}
