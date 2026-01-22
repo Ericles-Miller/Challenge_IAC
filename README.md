@@ -1,1 +1,476 @@
-# Challenge_IAC
+# Challenge IAC - Infraestrutura como Código com Terraform
+
+Projeto de infraestrutura na AWS usando Terraform para criar e gerenciar recursos de forma automatizada e versionada.
+
+## 📋 Índice
+
+- [Descrição do Projeto](#descrição-do-projeto)
+- [Pré-requisitos](#pré-requisitos)
+- [Estrutura do Projeto](#estrutura-do-projeto)
+- [Configuração Passo a Passo](#configuração-passo-a-passo)
+- [Como Usar](#como-usar)
+- [Recursos Criados](#recursos-criados)
+- [Ambientes](#ambientes)
+- [Próximos Passos](#próximos-passos)
+
+---
+
+## 📝 Descrição do Projeto
+
+Este projeto implementa uma infraestrutura básica na AWS com:
+- **VPC** (Virtual Private Cloud) com subnets públicas e privadas
+- **EC2** (instância Ubuntu 22.04 LTS)
+- **Internet Gateway** para acesso à internet
+- **NAT Gateways** para subnets privadas
+- Configurações separadas para múltiplos ambientes (dev, prod, staging)
+
+---
+
+## ✅ Pré-requisitos
+
+Antes de começar, você precisa ter instalado:
+
+- [Terraform](https://www.terraform.io/downloads) >= 1.0
+- [AWS CLI](https://aws.amazon.com/cli/) configurado
+- Conta AWS com credenciais configuradas
+- Chave SSH para acesso às instâncias EC2
+
+### Configurar AWS CLI
+
+```bash
+aws configure --profile ericles-dev
+# Informe: Access Key, Secret Key, região (us-east-1), output format (json)
+```
+
+---
+
+## 📁 Estrutura do Projeto
+
+```
+challenge_IAC/
+├── main.tf                    # Chamada dos módulos principais
+├── variables.tf               # Variáveis do projeto
+├── outputs.tf                 # Outputs visíveis após apply
+├── provider.tf                # Configuração do provider AWS
+├── terraform.dev.tfvars       # Valores específicos para DEV
+├── terraform.prod.tfvars      # Valores específicos para PROD
+├── terraform.staging.tfvars   # Valores específicos para STAGING
+└── modules/
+    ├── VPC/
+    │   ├── main.tf           # Recursos da VPC
+    │   ├── variables.tf      # Variáveis do módulo VPC
+    │   └── outputs.tf        # Outputs da VPC
+    └── EC2/
+        ├── main.tf           # Recurso EC2
+        ├── variables.tf      # Variáveis do módulo EC2
+        └── outputs.tf        # Outputs do EC2
+```
+
+---
+
+## 🚀 Configuração Passo a Passo
+
+### **1. Criar Chave SSH**
+
+```bash
+# Criar chave SSH local
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/challenge-iac-key -N "" -C "challenge-iac-dev"
+
+# Ver a chave pública
+cat ~/.ssh/challenge-iac-key.pub
+```
+
+### **2. Importar Chave SSH na AWS**
+
+**Opção A: Via Console AWS**
+1. Acesse: https://console.aws.amazon.com/ec2/
+2. Menu: Network & Security → Key Pairs
+3. Actions → Import key pair
+4. Nome: `challenge-iac-key`
+5. Cole o conteúdo de `~/.ssh/challenge-iac-key.pub`
+
+**Opção B: Via AWS CLI**
+```bash
+aws ec2 import-key-pair \
+  --key-name "challenge-iac-key" \
+  --public-key-material fileb://~/.ssh/challenge-iac-key.pub \
+  --region us-east-1 \
+  --profile ericles-dev
+```
+
+### **3. Configurar Módulo VPC**
+
+Criar `modules/VPC/main.tf`:
+```terraform
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+
+  name = var.vpc_name
+  cidr = var.vpc_cidr
+
+  azs             = var.availability_zones
+  private_subnets = var.private_subnets
+  public_subnets  = var.public_subnets
+
+  enable_nat_gateway = var.enable_nat_gateway
+  enable_vpn_gateway = var.enable_vpn_gateway
+
+  tags = merge(
+    var.tags,
+    {
+      Terraform   = "true"
+      Environment = var.environment
+    }
+  )
+}
+```
+
+Criar `modules/VPC/variables.tf` com as variáveis necessárias.
+
+Criar `modules/VPC/outputs.tf`:
+```terraform
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
+output "public_subnets" {
+  value = module.vpc.public_subnets
+}
+
+output "private_subnets" {
+  value = module.vpc.private_subnets
+}
+```
+
+### **4. Configurar Módulo EC2**
+
+Criar `modules/EC2/main.tf`:
+```terraform
+resource "aws_instance" "main" {
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  subnet_id                   = var.subnet_id
+  associate_public_ip_address = true
+
+  tags = {
+    Name        = var.instance_name
+    Environment = var.environment
+  }
+}
+```
+
+Criar `modules/EC2/variables.tf` e `modules/EC2/outputs.tf`.
+
+### **5. Configurar Arquivo Principal**
+
+Criar `main.tf` na raiz:
+```terraform
+module "vpc" {
+  source = "./modules/VPC"
+
+  vpc_name           = "vpc-${var.environment}"
+  vpc_cidr           = var.vpc_cidr
+  availability_zones = var.availability_zones
+  private_subnets    = var.private_subnets
+  public_subnets     = var.public_subnets
+  enable_nat_gateway = var.enable_nat_gateway
+  enable_vpn_gateway = var.enable_vpn_gateway
+  environment        = var.environment
+
+  tags = {
+    Project = "Challenge-IAC"
+  }
+}
+
+module "ec2" {
+  source = "./modules/EC2"
+
+  instance_name = "app-server-${var.environment}"
+  instance_type = var.ec2_instance_type
+  ami_id        = var.ec2_ami_id
+  key_name      = var.ec2_key_name
+  monitoring    = var.ec2_monitoring
+  vpc_id        = module.vpc.vpc_id
+  subnet_id     = module.vpc.public_subnets[0]
+  environment   = var.environment
+
+  tags = merge(
+    var.project_tags,
+    {
+      Name        = "app-server-${var.environment}"
+      Environment = var.environment
+    }
+  )
+}
+```
+
+### **6. Configurar Provider**
+
+Criar `provider.tf`:
+```terraform
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.28.0"
+    }
+  }
+
+  backend "s3" {
+    bucket  = "course-infra-state-bucket-tf"
+    region  = "us-east-1"
+    key     = "terraform.tfstate"
+    encrypt = true
+  }
+}
+
+provider "aws" {
+  region  = var.aws_region
+  profile = var.aws_profile
+
+  default_tags {
+    tags = {
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    }
+  }
+}
+```
+
+### **7. Definir Variáveis**
+
+Criar `variables.tf` com todas as variáveis necessárias (environment, aws_profile, vpc_cidr, etc.)
+
+### **8. Configurar Valores por Ambiente**
+
+Criar `terraform.dev.tfvars`:
+```terraform
+environment  = "dev"
+aws_profile  = "ericles-dev"
+aws_region   = "us-east-1"
+
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+public_subnets     = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnets    = ["10.0.10.0/24", "10.0.11.0/24"]
+enable_nat_gateway = true
+enable_vpn_gateway = false
+
+ec2_instance_type = "t3.small"
+ec2_ami_id        = "ami-0e2c8caa4b6378d8c"  # Ubuntu 22.04 LTS
+ec2_key_name      = "challenge-iac-key"
+ec2_monitoring    = false
+
+project_tags = {
+  Project = "Challenge-IAC"
+  Owner   = "Ericles"
+}
+```
+
+---
+
+## 🎯 Como Usar
+
+### **Inicializar o Terraform**
+
+```bash
+terraform init
+```
+
+Este comando:
+- Baixa os providers necessários (AWS)
+- Inicializa o backend (S3)
+- Baixa módulos externos
+
+### **Validar Configuração**
+
+```bash
+terraform validate
+```
+
+Verifica se a sintaxe está correta.
+
+### **Formatar Código**
+
+```bash
+terraform fmt -recursive
+```
+
+Formata automaticamente os arquivos `.tf`.
+
+### **Visualizar Mudanças (Plan)**
+
+```bash
+terraform plan -var-file="terraform.dev.tfvars"
+```
+
+Mostra o que será criado/modificado **sem aplicar** as mudanças.
+
+### **Aplicar Mudanças (Apply)**
+
+```bash
+terraform apply -var-file="terraform.dev.tfvars"
+```
+
+Cria os recursos na AWS. Digite `yes` para confirmar.
+
+### **Ver Outputs**
+
+```bash
+terraform output
+```
+
+Mostra informações importantes como IPs, IDs dos recursos, etc.
+
+### **Destruir Recursos**
+
+```bash
+terraform destroy -var-file="terraform.dev.tfvars"
+```
+
+⚠️ **CUIDADO:** Remove TODOS os recursos criados. Digite `yes` para confirmar.
+
+---
+
+## 🏗️ Recursos Criados
+
+Ao executar `terraform apply`, os seguintes recursos são criados na AWS:
+
+### **VPC e Rede**
+- 1 VPC (10.0.0.0/16)
+- 2 Subnets Públicas (10.0.1.0/24, 10.0.2.0/24)
+- 2 Subnets Privadas (10.0.10.0/24, 10.0.11.0/24)
+- 1 Internet Gateway
+- 2 NAT Gateways (um por AZ)
+- Route Tables (públicas e privadas)
+
+### **Compute**
+- 1 Instância EC2 Ubuntu 22.04 LTS
+  - Tipo: t3.small (2GB RAM, 2 vCPUs)
+  - IP público atribuído automaticamente
+  - Localizada em subnet pública
+
+### **Custos Estimados (us-east-1)**
+- EC2 t3.small: ~$15/mês
+- NAT Gateway (2x): ~$64/mês
+- **Total aproximado: $79/mês**
+
+---
+
+## 🌍 Ambientes
+
+O projeto suporta múltiplos ambientes:
+
+### **Desenvolvimento (dev)**
+```bash
+terraform apply -var-file="terraform.dev.tfvars"
+```
+- Recursos menores
+- NAT Gateway habilitado
+- Monitoramento desabilitado
+
+### **Produção (prod)**
+```bash
+terraform apply -var-file="terraform.prod.tfvars"
+```
+- Recursos maiores
+- Alta disponibilidade
+- Monitoramento habilitado
+- Proteção contra terminação
+
+### **Staging**
+```bash
+terraform apply -var-file="terraform.staging.tfvars"
+```
+- Ambiente de testes pré-produção
+
+---
+
+## 🔐 Conectar à Instância EC2
+
+Após o `terraform apply`, use o output para conectar via SSH:
+
+```bash
+# Ver o IP público
+terraform output ec2_public_ip
+
+# Conectar via SSH
+ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
+```
+
+---
+
+## 📚 Conceitos Importantes
+
+### **Subnet Pública vs Privada**
+- **Pública:** Tem rota para Internet Gateway, recursos podem ter IP público
+- **Privada:** Sem rota direta para internet, usa NAT Gateway para saída
+
+### **NAT Gateway**
+- Permite que recursos em subnets privadas acessem a internet
+- Necessário para atualizações de sistema, downloads, etc.
+- Tem custo por hora + tráfego de dados
+
+### **Modules**
+- Agrupam recursos relacionados
+- Permitem reutilização de código
+- Facilitam manutenção e organização
+
+### **AMI (Amazon Machine Image)**
+- Imagem do sistema operacional para EC2
+- Cada região tem AMIs diferentes
+- Ubuntu 22.04 LTS: ami-0e2c8caa4b6378d8c (us-east-1)
+
+---
+
+## 🔄 Próximos Passos
+
+**Recursos a serem implementados:**
+
+1. **Security Groups** - Regras de firewall para controlar tráfego
+2. **Load Balancer** - Distribuir tráfego entre múltiplas instâncias
+3. **Auto Scaling** - Escalar automaticamente com base na demanda
+4. **Bastion Host** - Acesso seguro a recursos privados
+5. **RDS** - Banco de dados gerenciado
+6. **S3 Buckets** - Armazenamento de objetos
+7. **CloudWatch** - Monitoramento e logs
+
+---
+
+## 🛠️ Troubleshooting
+
+### Erro: "InvalidAMIID.Malformed"
+**Solução:** Verifique se o AMI ID é válido para a região configurada.
+
+### Erro: "No value for required variable"
+**Solução:** Verifique se todas as variáveis estão definidas no arquivo `.tfvars`.
+
+### Erro: "locked provider version"
+**Solução:** Execute `terraform init -upgrade`.
+
+### EC2 sem IP público
+**Solução:** Adicione `associate_public_ip_address = true` no recurso EC2.
+
+---
+
+## 📖 Referências
+
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [Terraform VPC Module](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest)
+- [AWS VPC Documentation](https://docs.aws.amazon.com/vpc/)
+- [AWS EC2 Documentation](https://docs.aws.amazon.com/ec2/)
+
+---
+
+## 👤 Autor
+
+**Ericles Miller**
+
+Projeto desenvolvido como parte do desafio de Infraestrutura como Código (IaC).
+
+---
+
+## 📄 Licença
+
+Este projeto é apenas para fins educacionais.
