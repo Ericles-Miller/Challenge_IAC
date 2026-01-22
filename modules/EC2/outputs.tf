@@ -26,3 +26,7 @@ output "availability_zone" {
   description = "Availability Zone da instância"
   value       = aws_instance.main.availability_zone
 }
+output "security_group_id" {
+  description = "ID do Security Group da EC2"
+  value       = aws_security_group.ec2.id
+}
