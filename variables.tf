@@ -117,3 +117,25 @@ variable "ebs_volume_type" {
   description = "Tipo do volume EBS (gp3 recomendado)"
   default     = "gp3"
 }
+
+# ==================================================
+# VARIÁVEIS IAM
+# ==================================================
+
+variable "enable_iam_role" {
+  type        = bool
+  description = "Habilitar IAM Role para EC2"
+  default     = true
+}
+
+variable "enable_s3_access" {
+  type        = bool
+  description = "Habilitar acesso ao S3"
+  default     = false
+}
+
+variable "s3_bucket_arns" {
+  type        = list(string)
+  description = "Lista de ARNs dos buckets S3 que a EC2 pode acessar"
+  default     = []
+}

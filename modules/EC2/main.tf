@@ -66,6 +66,9 @@ resource "aws_instance" "main" {
   # Associa o Security Group criado acima
   vpc_security_group_ids = [aws_security_group.ec2.id]
   
+  # IAM Instance Profile (permissões da EC2)
+  iam_instance_profile = var.iam_instance_profile != "" ? var.iam_instance_profile : null
+  
   # ==================================================
   # CRIPTOGRAFIA EBS - Volume Raiz
   # ==================================================
