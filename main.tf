@@ -19,6 +19,21 @@ module "vpc" {
 }
 
 # ==================================================
+# MÓDULO IAM - Permissões para EC2
+# ==================================================
+module "iam" {
+  count  = var.enable_iam_role ? 1 : 0
+  source = "./modules/IAM"
+
+  role_name        = "ec2-role-${var.environment}"
+  environment      = var.environment
+  enable_s3_access = var.enable_s3_access
+  s3_bucket_arns   = var.s3_bucket_arns
+
+  tags = var.project_tags
+}
+
+# ==================================================
 # MÓDULO LOAD BALANCER - Distribui tráfego
 # ==================================================
 module "loadbalancer" {
@@ -67,6 +82,9 @@ module "ec2" {
   enable_ebs_encryption = var.enable_ebs_encryption
   ebs_volume_size       = var.ebs_volume_size
   ebs_volume_type       = var.ebs_volume_type
+
+  # IAM Instance Profile
+  iam_instance_profile = var.enable_iam_role ? module.iam[0].instance_profile_name : ""
 
   # Ambiente
   environment = var.environment

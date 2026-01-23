@@ -67,3 +67,21 @@ output "lb_arn" {
   description = "ARN do Load Balancer"
   value       = module.loadbalancer.lb_arn
 }
+
+# ==================================================
+# IAM ROLE
+# ==================================================
+output "iam_role_name" {
+  description = "Nome da IAM Role da EC2"
+  value       = var.enable_iam_role ? module.iam[0].role_name : "IAM Role desabilitada"
+}
+
+output "iam_role_arn" {
+  description = "ARN da IAM Role"
+  value       = var.enable_iam_role ? module.iam[0].role_arn : null
+}
+
+output "iam_instance_profile" {
+  description = "Nome do IAM Instance Profile"
+  value       = var.enable_iam_role ? module.iam[0].instance_profile_name : null
+}
