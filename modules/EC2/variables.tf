@@ -77,3 +77,13 @@ variable "ebs_volume_type" {
   description = "Tipo do volume EBS (gp3, gp2, io1, io2)"
   default     = "gp3"
 }
+
+# ==================================================
+# IAM
+# ==================================================
+
+variable "iam_instance_profile" {
+  type        = string
+  description = "Nome do IAM Instance Profile"
+  default     = ""
+}

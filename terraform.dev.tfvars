@@ -43,3 +43,13 @@ project_tags = {
 enable_ebs_encryption = true        # ✅ Criptografia habilitada
 ebs_volume_size       = 8           # 8 GB (suficiente para API)
 ebs_volume_type       = "gp3"       # SSD de última geração
+
+# ==================================================
+# IAM ROLE
+# ==================================================
+enable_iam_role  = true             # ✅ Habilitar IAM Role
+enable_s3_access = false            # S3 desabilitado (altere se necessário)
+s3_bucket_arns   = []               # Adicione ARNs se enable_s3_access = true
+# Exemplo com S3:
+# enable_s3_access = true
+# s3_bucket_arns = ["arn:aws:s3:::meu-bucket-dev"]
