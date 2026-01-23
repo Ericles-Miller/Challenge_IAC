@@ -36,3 +36,10 @@ project_tags = {
   Project = "Challenge-IAC"
   Owner   = "Ericles"
 }
+
+# ==================================================
+# CRIPTOGRAFIA EBS
+# ==================================================
+enable_ebs_encryption = true        # ✅ Criptografia habilitada
+ebs_volume_size       = 8           # 8 GB (suficiente para API)
+ebs_volume_type       = "gp3"       # SSD de última geração

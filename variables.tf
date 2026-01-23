@@ -95,3 +95,25 @@ variable "project_tags" {
     Project = "Challenge-IAC"
   }
 }
+
+# ==================================================
+# VARIÁVEIS DE CRIPTOGRAFIA EBS
+# ==================================================
+
+variable "enable_ebs_encryption" {
+  type        = bool
+  description = "Habilitar criptografia nos volumes EBS"
+  default     = true
+}
+
+variable "ebs_volume_size" {
+  type        = number
+  description = "Tamanho do volume EBS em GB"
+  default     = 30
+}
+
+variable "ebs_volume_type" {
+  type        = string
+  description = "Tipo do volume EBS (gp3 recomendado)"
+  default     = "gp3"
+}

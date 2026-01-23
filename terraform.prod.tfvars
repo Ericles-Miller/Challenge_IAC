@@ -41,3 +41,10 @@ project_tags = {
   Environment = "Production"
   CostCenter  = "Engineering"
 }
+
+# ==================================================
+# CRIPTOGRAFIA EBS
+# ==================================================
+enable_ebs_encryption = true        # ✅ Criptografia habilitada (obrigatório em prod)
+ebs_volume_size       = 10          # 10 GB (adequado para API com dados externos)
+ebs_volume_type       = "gp3"       # SSD de última geração
