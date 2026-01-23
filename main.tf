@@ -63,6 +63,11 @@ module "ec2" {
   # IPs permitidos para SSH
   ssh_allowed_ips = var.ssh_allowed_ips
 
+  # Criptografia EBS
+  enable_ebs_encryption = var.enable_ebs_encryption
+  ebs_volume_size       = var.ebs_volume_size
+  ebs_volume_type       = var.ebs_volume_type
+
   # Ambiente
   environment = var.environment
 
