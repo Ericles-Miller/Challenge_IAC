@@ -1,46 +1,282 @@
-# Challenge IAC - Infraestrutura como Código com Terraform
+# Challenge IAC - Infraestrutura como Código na AWS
 
-Projeto de infraestrutura na AWS usando Terraform para criar e gerenciar recursos de forma automatizada e versionada.
+Projeto de Infrastructure as Code (IaC) usando Terraform para criar uma infraestrutura completa na AWS com VPC, EC2 e Application Load Balancer.
 
-## 📋 Índice
+## 📋 Sumário
 
-- [Descrição do Projeto](#descrição-do-projeto)
-- [Pré-requisitos](#pré-requisitos)
+- [Visão Geral](#visão-geral)
+- [Arquitetura](#arquitetura)
+- [Serviços Implementados](#serviços-implementados)
 - [Estrutura do Projeto](#estrutura-do-projeto)
-- [Configuração Passo a Passo](#configuração-passo-a-passo)
+- [Pré-requisitos](#pré-requisitos)
 - [Como Usar](#como-usar)
-- [Recursos Criados](#recursos-criados)
-- [Ambientes](#ambientes)
+- [Configuração de Ambientes](#configuração-de-ambientes)
+- [Segurança](#segurança)
 - [Próximos Passos](#próximos-passos)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## 📝 Descrição do Projeto
+## 🎯 Visão Geral
 
-Este projeto implementa uma infraestrutura básica na AWS com:
-- **VPC** (Virtual Private Cloud) com subnets públicas e privadas
-- **EC2** (instância Ubuntu 22.04 LTS)
-- **Internet Gateway** para acesso à internet
-- **NAT Gateways** para subnets privadas
-- Configurações separadas para múltiplos ambientes (dev, prod, staging)
+Este projeto implementa uma infraestrutura de rede completa na AWS utilizando Terraform, seguindo as melhores práticas de segurança e organização em módulos reutilizáveis.
+
+### O que foi implementado:
+
+- **VPC** com subnets públicas e privadas em múltiplas availability zones
+- **EC2** com configurações de segurança restritivas
+- **Application Load Balancer (ALB)** para distribuição de tráfego
+- **Security Groups** configurados com princípio de menor privilégio
+- **Separação de ambientes** (dev e prod) com configurações distintas
 
 ---
 
-## ✅ Pré-requisitos
+## 🏗️ Arquitetura
 
-Antes de começar, você precisa ter instalado:
-
-- [Terraform](https://www.terraform.io/downloads) >= 1.0
-- [AWS CLI](https://aws.amazon.com/cli/) configurado
-- Conta AWS com credenciais configuradas
-- Chave SSH para acesso às instâncias EC2
-
-### Configurar AWS CLI
-
-```bash
-aws configure --profile ericles-dev
-# Informe: Access Key, Secret Key, região (us-east-1), output format (json)
 ```
+Internet
+    |
+    v
+Internet Gateway
+    |
+    v
+Application Load Balancer (ALB)
+    |  (subnets públicas)
+    |  - us-east-1a
+    |  - us-east-1b
+    |
+    v
+Target Group (Port 80)
+    |
+    v
+EC2 Instance (subnets públicas)
+    |
+    v
+Application (Nginx/API - a ser instalado)
+```
+
+### Fluxo de Tráfego:
+
+1. **Usuário** → Acessa o DNS do Load Balancer
+2. **ALB** → Recebe requisição nas portas 80/443
+3. **Target Group** → Verifica saúde da EC2 (health checks)
+4. **EC2** → Recebe tráfego apenas do Load Balancer
+5. **Aplicação** → Processa requisição e retorna resposta
+
+### Diagrama de Rede:
+
+```
+VPC (10.0.0.0/16 - dev | 10.1.0.0/16 - prod)
+│
+├── Subnets Públicas
+│   ├── us-east-1a (10.0.1.0/24)
+│   └── us-east-1b (10.0.2.0/24)
+│
+├── Subnets Privadas
+│   ├── us-east-1a (10.0.3.0/24)
+│   └── us-east-1b (10.0.4.0/24)
+│
+├── Internet Gateway
+│   └── Rota: 0.0.0.0/0 → IGW
+│
+└── Security Groups
+    ├── Load Balancer SG
+    │   ├── Ingress: 0.0.0.0/0:80
+    │   ├── Ingress: 0.0.0.0/0:443
+    │   └── Egress: 0.0.0.0/0 (all)
+    │
+    └── EC2 SG
+        ├── Ingress: LB-SG:80
+        ├── Ingress: LB-SG:443
+        ├── Ingress: SSH (dinâmico - configurável)
+        └── Egress: 0.0.0.0/0 (all)
+```
+
+---
+
+## 🛠️ Serviços Implementados
+
+### 1. VPC (Virtual Private Cloud)
+
+**Objetivo:** Criar uma rede isolada e segura na AWS.
+
+**O que foi configurado:**
+
+- **CIDR Block:** 
+  - Dev: `10.0.0.0/16`
+  - Prod: `10.1.0.0/16`
+- **Subnets Públicas:** 2 subnets em AZs diferentes (us-east-1a, us-east-1b)
+- **Subnets Privadas:** 2 subnets em AZs diferentes (para uso futuro)
+- **Internet Gateway:** Permite comunicação com a internet
+- **Route Tables:** 
+  - Pública: Rota 0.0.0.0/0 → Internet Gateway
+  - Privada: Apenas tráfego interno (preparada para NAT Gateway futuro)
+
+**Por que 2 Availability Zones?**
+- **Alta disponibilidade:** Se uma AZ cair, a outra continua funcionando
+- **Requisito do ALB:** Load Balancers exigem no mínimo 2 AZs
+
+**Arquivo:** `modules/VPC/main.tf`
+
+**Recursos criados:**
+- `aws_vpc`
+- `aws_subnet` (4 subnets)
+- `aws_internet_gateway`
+- `aws_route_table` (2 tabelas)
+- `aws_route_table_association` (4 associações)
+
+---
+
+### 2. EC2 (Elastic Compute Cloud)
+
+**Objetivo:** Instância de servidor onde a aplicação será executada.
+
+**O que foi configurado:**
+
+- **Tipo de Instância:**
+  - Dev: `t3.small` (2 vCPUs, 2GB RAM)
+  - Prod: `t3.medium` (2 vCPUs, 4GB RAM)
+- **AMI:** Ubuntu 22.04 LTS (automático via data source)
+- **Subnet:** Subnet pública na us-east-1a
+- **IP Público:** Sim (para acesso SSH e testes)
+- **Monitoring:**
+  - Dev: Desabilitado
+  - Prod: Habilitado (métricas detalhadas)
+- **Key Pair:** 
+  - Dev: `challenge-iac-key`
+  - Prod: `challenge-iac-key-prod`
+
+**Security Group da EC2:**
+
+| Tipo | Porta | Origem | Descrição |
+|------|-------|--------|-----------|
+| Ingress | 80 | Load Balancer SG | HTTP apenas do ALB |
+| Ingress | 443 | Load Balancer SG | HTTPS apenas do ALB |
+| Ingress | 22 | Configurável (tfvars) | SSH (dinâmico) |
+| Egress | All | 0.0.0.0/0 | Saída para internet |
+
+**Configuração Dinâmica de SSH:**
+
+```hcl
+# SSH só é criado se houver IPs em ssh_allowed_ips
+dynamic "ingress" {
+  for_each = length(var.ssh_allowed_ips) > 0 ? [1] : []
+  content {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.ssh_allowed_ips
+  }
+}
+```
+
+**Por que a EC2 só aceita tráfego do Load Balancer?**
+- **Segurança:** EC2 não fica exposta diretamente na internet
+- **Controle:** Todo tráfego passa pelo ALB (logs, WAF, etc)
+- **Isolamento:** Aplicação protegida de acessos diretos
+
+**Arquivo:** `modules/EC2/main.tf`
+
+**Recursos criados:**
+- `aws_instance`
+- `aws_security_group` (EC2)
+
+---
+
+### 3. Application Load Balancer (ALB)
+
+**Objetivo:** Distribuir tráfego HTTP/HTTPS para as instâncias EC2 e fazer health checks.
+
+**O que foi configurado:**
+
+#### 3.1 Load Balancer Security Group
+
+**Função:** Controlar o tráfego de entrada e saída do ALB.
+
+| Tipo | Porta | Origem | Descrição |
+|------|-------|--------|-----------|
+| Ingress | 80 | 0.0.0.0/0 | HTTP de qualquer origem |
+| Ingress | 443 | 0.0.0.0/0 | HTTPS de qualquer origem |
+| Egress | All | 0.0.0.0/0 | Saída para internet |
+
+**Por que Egress 0.0.0.0/0?**
+- Evita dependência circular com EC2 Security Group
+- Segurança é garantida pelo Security Group da EC2 (que só aceita do ALB)
+
+#### 3.2 Target Group
+
+**Função:** Agrupar instâncias EC2 que receberão tráfego do ALB.
+
+**Configuração:**
+```hcl
+Port: 80
+Protocol: HTTP
+VPC: Mesma VPC da EC2
+
+Health Check:
+  - Path: "/"
+  - Interval: 30 segundos
+  - Timeout: 5 segundos
+  - Healthy Threshold: 2 (2 checks OK = saudável)
+  - Unhealthy Threshold: 2 (2 checks falhos = não saudável)
+```
+
+**O que é Health Check?**
+- O ALB faz requisições periódicas para o path `/` da EC2
+- Se receber HTTP 200, marca como "Healthy"
+- Se falhar 2 vezes seguidas, marca como "Unhealthy" e para de enviar tráfego
+
+#### 3.3 Application Load Balancer
+
+**Configuração:**
+```hcl
+Type: application
+Scheme: internet-facing (público)
+IP Address Type: ipv4
+Subnets: 2 subnets públicas (us-east-1a, us-east-1b)
+Security Groups: Load Balancer SG
+```
+
+**Características:**
+- **DNS automático:** AWS fornece um DNS (ex: `alb-dev-*.us-east-1.elb.amazonaws.com`)
+- **Distribuição:** Roteia tráfego apenas para targets "Healthy"
+- **Multi-AZ:** Se uma AZ cair, continua funcionando na outra
+
+#### 3.4 Listener
+
+**Função:** "Ouvir" requisições na porta 80 e encaminhar para o Target Group.
+
+**Configuração:**
+```hcl
+Port: 80
+Protocol: HTTP
+Default Action: Forward para Target Group
+```
+
+**Fluxo:**
+```
+Usuário faz requisição → Listener porta 80 → Target Group → EC2 saudável
+```
+
+#### 3.5 Target Group Attachment
+
+**Função:** Registrar a instância EC2 no Target Group.
+
+**Configuração:**
+```hcl
+Target Group: Main TG
+Target ID: ID da EC2
+Port: 80
+```
+
+**Arquivo:** `modules/LOADBALANCER/main.tf`
+
+**Recursos criados:**
+- `aws_security_group` (Load Balancer)
+- `aws_lb_target_group`
+- `aws_lb`
+- `aws_lb_listener`
+- `aws_lb_target_group_attachment`
 
 ---
 
@@ -48,312 +284,176 @@ aws configure --profile ericles-dev
 
 ```
 challenge_IAC/
-├── main.tf                    # Chamada dos módulos principais
-├── variables.tf               # Variáveis do projeto
-├── outputs.tf                 # Outputs visíveis após apply
+│
+├── main.tf                    # Orquestração dos módulos
+├── variables.tf               # Variáveis do root module
+├── outputs.tf                 # Outputs do root module
 ├── provider.tf                # Configuração do provider AWS
-├── terraform.dev.tfvars       # Valores específicos para DEV
-├── terraform.prod.tfvars      # Valores específicos para PROD
-├── terraform.staging.tfvars   # Valores específicos para STAGING
+├── terraform.dev.tfvars       # Valores para ambiente dev
+├── terraform.prod.tfvars      # Valores para ambiente prod
+├── README.md                  # Esta documentação
+│
 └── modules/
+    │
     ├── VPC/
     │   ├── main.tf           # Recursos da VPC
-    │   ├── variables.tf      # Variáveis do módulo VPC
-    │   └── outputs.tf        # Outputs da VPC
-    └── EC2/
-        ├── main.tf           # Recurso EC2
-        ├── variables.tf      # Variáveis do módulo EC2
-        └── outputs.tf        # Outputs do EC2
+    │   ├── variables.tf      # Inputs do módulo VPC
+    │   └── outputs.tf        # Outputs do módulo VPC
+    │
+    ├── EC2/
+    │   ├── main.tf           # Recursos da EC2
+    │   ├── variables.tf      # Inputs do módulo EC2
+    │   └── outputs.tf        # Outputs do módulo EC2
+    │
+    └── LOADBALANCER/
+        ├── main.tf           # Recursos do Load Balancer
+        ├── variables.tf      # Inputs do módulo LB
+        └── outputs.tf        # Outputs do módulo LB
 ```
 
----
+### Organização dos Módulos
 
-## 🚀 Configuração Passo a Passo
+**Por que usar módulos?**
+- **Reutilização:** Mesma VPC pode ser usada em vários projetos
+- **Manutenção:** Mudanças isoladas sem afetar outros recursos
+- **Clareza:** Cada módulo tem responsabilidade única
+- **Testes:** Fácil testar cada módulo separadamente
 
-### **1. Criar Chave SSH**
+### Ordem de Criação (Dependências)
 
-```bash
-# Criar chave SSH local
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/challenge-iac-key -N "" -C "challenge-iac-dev"
-
-# Ver a chave pública
-cat ~/.ssh/challenge-iac-key.pub
+```
+1. VPC
+   ↓
+2. Load Balancer (precisa de VPC ID e subnets)
+   ↓
+3. EC2 (precisa de VPC ID, subnet ID, e LB Security Group)
 ```
 
-### **2. Importar Chave SSH na AWS**
+**Configurado em:** `main.tf`
 
-**Opção A: Via Console AWS**
-1. Acesse: https://console.aws.amazon.com/ec2/
-2. Menu: Network & Security → Key Pairs
-3. Actions → Import key pair
-4. Nome: `challenge-iac-key`
-5. Cole o conteúdo de `~/.ssh/challenge-iac-key.pub`
+```hcl
+module "vpc" { ... }
 
-**Opção B: Via AWS CLI**
-```bash
-aws ec2 import-key-pair \
-  --key-name "challenge-iac-key" \
-  --public-key-material fileb://~/.ssh/challenge-iac-key.pub \
-  --region us-east-1 \
-  --profile ericles-dev
-```
-
-### **3. Configurar Módulo VPC**
-
-Criar `modules/VPC/main.tf`:
-```terraform
-module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
-
-  name = var.vpc_name
-  cidr = var.vpc_cidr
-
-  azs             = var.availability_zones
-  private_subnets = var.private_subnets
-  public_subnets  = var.public_subnets
-
-  enable_nat_gateway = var.enable_nat_gateway
-  enable_vpn_gateway = var.enable_vpn_gateway
-
-  tags = merge(
-    var.tags,
-    {
-      Terraform   = "true"
-      Environment = var.environment
-    }
-  )
-}
-```
-
-Criar `modules/VPC/variables.tf` com as variáveis necessárias.
-
-Criar `modules/VPC/outputs.tf`:
-```terraform
-output "vpc_id" {
-  value = module.vpc.vpc_id
-}
-
-output "public_subnets" {
-  value = module.vpc.public_subnets
-}
-
-output "private_subnets" {
-  value = module.vpc.private_subnets
-}
-```
-
-### **4. Configurar Módulo EC2**
-
-Criar `modules/EC2/main.tf`:
-
-**A) Primeiro, criar o Security Group para controlar o tráfego:**
-
-```terraform
-# Security Group - Firewall virtual para a instância EC2
-resource "aws_security_group" "ec2" {
-  name        = "allow-ssh-http-https-${var.instance_name}"
-  description = "Security group for EC2 instance - allows SSH, HTTP and HTTPS"
-  vpc_id      = var.vpc_id
-
-  # Regra de entrada - SSH (porta 22)
-  ingress {
-    description = "SSH from anywhere"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # ⚠️ Em produção, restrinja para seu IP específico
-  }
-
-  # Regra de entrada - HTTP (porta 80)
-  ingress {
-    description = "HTTP from anywhere"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Regra de entrada - HTTPS (porta 443)
-  ingress {
-    description = "HTTPS from anywhere"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Regra de saída - Permite todo tráfego de saída
-  egress {
-    description = "Allow all outbound traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"  # -1 significa todos os protocolos
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(
-    var.tags,
-    {
-      Name = "sg-${var.instance_name}"
-    }
-  )
-}
-```
-
-**B) Depois, criar a instância EC2 vinculando o Security Group:**
-
-```terraform
-# Instância EC2
-resource "aws_instance" "main" {
-  ami                         = var.ami_id
-  instance_type               = var.instance_type
-  key_name                    = var.key_name
-  subnet_id                   = var.subnet_id
-  vpc_security_group_ids      = [aws_security_group.ec2.id]  # ← Vincula o Security Group
-  associate_public_ip_address = true
-  monitoring                  = var.monitoring
-
-  tags = merge(
-    var.tags,
-    {
-      Name        = var.instance_name
-      Environment = var.environment
-    }
-  )
-}
-```
-
-**Importante:**
-- O Security Group **DEVE** ser criado antes da instância EC2
-- A propriedade `vpc_security_group_ids` vincula o Security Group à instância
-- Sem Security Group configurado, você NÃO conseguirá acessar a EC2 via SSH
-
-Criar `modules/EC2/variables.tf` com as variáveis `vpc_id`, `instance_name`, `instance_type`, `ami_id`, `key_name`, `subnet_id`, `monitoring`, `environment` e `tags`.
-
-Criar `modules/EC2/outputs.tf` com os outputs da instância.
-
-### **5. Configurar Arquivo Principal**
-
-Criar `main.tf` na raiz:
-```terraform
-module "vpc" {
-  source = "./modules/VPC"
-
-  vpc_name           = "vpc-${var.environment}"
-  vpc_cidr           = var.vpc_cidr
-  availability_zones = var.availability_zones
-  private_subnets    = var.private_subnets
-  public_subnets     = var.public_subnets
-  enable_nat_gateway = var.enable_nat_gateway
-  enable_vpn_gateway = var.enable_vpn_gateway
-  environment        = var.environment
-
-  tags = {
-    Project = "Challenge-IAC"
-  }
+module "loadbalancer" {
+  # Depende dos outputs da VPC
+  vpc_id         = module.vpc.vpc_id
+  public_subnets = module.vpc.public_subnet_ids
 }
 
 module "ec2" {
-  source = "./modules/EC2"
-
-  instance_name = "app-server-${var.environment}"
-  instance_type = var.ec2_instance_type
-  ami_id        = var.ec2_ami_id
-  key_name      = var.ec2_key_name
-  monitoring    = var.ec2_monitoring
-  vpc_id        = module.vpc.vpc_id
-  subnet_id     = module.vpc.public_subnets[0]
-  environment   = var.environment
-
-  tags = merge(
-    var.project_tags,
-    {
-      Name        = "app-server-${var.environment}"
-      Environment = var.environment
-    }
-  )
-}
-```
-
-### **6. Configurar Provider**
-
-Criar `provider.tf`:
-```terraform
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 6.28.0"
-    }
-  }
-
-  backend "s3" {
-    bucket  = "course-infra-state-bucket-tf"
-    region  = "us-east-1"
-    key     = "terraform.tfstate"
-    encrypt = true
-  }
-}
-
-provider "aws" {
-  region  = var.aws_region
-  profile = var.aws_profile
-
-  default_tags {
-    tags = {
-      Environment = var.environment
-      ManagedBy   = "Terraform"
-    }
-  }
-}
-```
-
-### **7. Definir Variáveis**
-
-Criar `variables.tf` com todas as variáveis necessárias (environment, aws_profile, vpc_cidr, etc.)
-
-### **8. Configurar Valores por Ambiente**
-
-Criar `terraform.dev.tfvars`:
-```terraform
-environment  = "dev"
-aws_profile  = "ericles-dev"
-aws_region   = "us-east-1"
-
-vpc_cidr           = "10.0.0.0/16"
-availability_zones = ["us-east-1a", "us-east-1b"]
-public_subnets     = ["10.0.1.0/24", "10.0.2.0/24"]
-private_subnets    = ["10.0.10.0/24", "10.0.11.0/24"]
-enable_nat_gateway = true
-enable_vpn_gateway = false
-
-ec2_instance_type = "t3.small"
-ec2_ami_id        = "ami-0e2c8caa4b6378d8c"  # Ubuntu 22.04 LTS
-ec2_key_name      = "challenge-iac-key"
-ec2_monitoring    = false
-
-project_tags = {
-  Project = "Challenge-IAC"
-  Owner   = "Ericles"
+  # Depende dos outputs da VPC e Load Balancer
+  vpc_id                = module.vpc.vpc_id
+  subnet_id             = module.vpc.public_subnet_ids[0]
+  lb_security_group_id  = module.loadbalancer.lb_security_group_id
 }
 ```
 
 ---
 
-## 🎯 Como Usar
+## ✅ Pré-requisitos
 
-### **Inicializar o Terraform**
+### 1. Ferramentas Necessárias
+
+- **Terraform:** >= 1.0
+  ```bash
+  terraform version
+  ```
+
+- **AWS CLI:** Configurado com credenciais
+  ```bash
+  aws --version
+  aws configure list
+  ```
+
+### 2. Credenciais AWS
+
+Você precisa ter profiles AWS configurados:
+
+**Dev:**
+```bash
+aws configure --profile ericles-dev
+# AWS Access Key ID: [sua_key]
+# AWS Secret Access Key: [seu_secret]
+# Default region: us-east-1
+# Default output format: json
+```
+
+**Prod:**
+```bash
+aws configure --profile ericles-prod
+```
+
+### 3. Key Pair
+
+**Dev:** Criar key pair chamada `challenge-iac-key`:
+```bash
+aws ec2 create-key-pair \
+  --key-name challenge-iac-key \
+  --profile ericles-dev \
+  --region us-east-1 \
+  --query 'KeyMaterial' \
+  --output text > ~/.ssh/challenge-iac-key.pem
+
+chmod 400 ~/.ssh/challenge-iac-key.pem
+```
+
+**Prod:** Criar key pair chamada `challenge-iac-key-prod`:
+```bash
+aws ec2 create-key-pair \
+  --key-name challenge-iac-key-prod \
+  --profile ericles-prod \
+  --region us-east-1 \
+  --query 'KeyMaterial' \
+  --output text > ~/.ssh/challenge-iac-key-prod.pem
+
+chmod 400 ~/.ssh/challenge-iac-key-prod.pem
+```
+
+### 4. Backend S3 (Opcional)
+
+Se quiser usar S3 backend para state remoto, crie o bucket:
+
+```bash
+aws s3 mb s3://seu-bucket-terraform-state \
+  --profile ericles-dev \
+  --region us-east-1
+```
+
+E configure em `provider.tf`:
+```hcl
+terraform {
+  backend "s3" {
+    bucket  = "seu-bucket-terraform-state"
+    key     = "challenge-iac/terraform.tfstate"
+    region  = "us-east-1"
+    profile = "ericles-dev"
+  }
+}
+```
+
+---
+
+## 🚀 Como Usar
+
+### 1. Clone o Repositório
+
+```bash
+git clone https://github.com/Ericles-Miller/Challenge_IAC.git
+cd challenge_IAC
+```
+
+### 2. Inicializar Terraform
 
 ```bash
 terraform init
 ```
 
 Este comando:
-- Baixa os providers necessários (AWS)
-- Inicializa o backend (S3)
-- Baixa módulos externos
+- Baixa o provider AWS
+- Configura o backend (se configurado)
+- Inicializa os módulos
 
-### **Validar Configuração**
+### 3. Validar Configuração
 
 ```bash
 terraform validate
@@ -361,287 +461,614 @@ terraform validate
 
 Verifica se a sintaxe está correta.
 
-### **Formatar Código**
-
-```bash
-terraform fmt -recursive
-```
-
-Formata automaticamente os arquivos `.tf`.
-
-### **Visualizar Mudanças (Plan)**
+### 4. Planejar Deploy (Dev)
 
 ```bash
 terraform plan -var-file="terraform.dev.tfvars"
 ```
 
-Mostra o que será criado/modificado **sem aplicar** as mudanças.
+Este comando mostra:
+- Recursos que serão criados
+- Mudanças que serão feitas
+- Possíveis erros
 
-### **Aplicar Mudanças (Apply)**
+### 5. Aplicar Infraestrutura (Dev)
 
 ```bash
 terraform apply -var-file="terraform.dev.tfvars"
 ```
 
-Cria os recursos na AWS. Digite `yes` para confirmar.
+Digite `yes` quando solicitado.
 
-### **Ver Outputs**
+**Tempo estimado:** 3-5 minutos
+
+### 6. Verificar Outputs
 
 ```bash
 terraform output
 ```
 
-Mostra informações importantes como IPs, IDs dos recursos, etc.
+Você verá:
+```
+ec2_public_ip = "54.90.219.117"
+lb_dns_name = "alb-dev-123456789.us-east-1.elb.amazonaws.com"
+lb_url = "http://alb-dev-123456789.us-east-1.elb.amazonaws.com"
+ssh_connection = "ssh -i ~/.ssh/challenge-iac-key.pem ubuntu@54.90.219.117"
+vpc_id = "vpc-0123456789abcdef"
+```
 
-### **Destruir Recursos**
+### 7. Acessar EC2 via SSH
+
+```bash
+# Copiar comando do output
+terraform output -raw ssh_connection | sh
+```
+
+Ou manualmente:
+```bash
+ssh -i ~/.ssh/challenge-iac-key.pem ubuntu@<EC2_PUBLIC_IP>
+```
+
+### 8. Instalar Aplicação (Nginx - exemplo)
+
+**Dentro da EC2:**
+```bash
+# Atualizar sistema
+sudo apt update
+
+# Instalar Nginx
+sudo apt install -y nginx
+
+# Verificar se está rodando
+sudo systemctl status nginx
+
+# Testar localmente
+curl localhost
+```
+
+**Verificar Health Check:**
+- Aguarde 30-60 segundos
+- Acesse AWS Console → EC2 → Target Groups
+- Verifique se o status da EC2 é "Healthy"
+
+### 9. Testar Load Balancer
+
+**No seu navegador:**
+```
+http://<LB_DNS_NAME>
+```
+
+Você deve ver a página padrão do Nginx.
+
+### 10. Destruir Infraestrutura (quando necessário)
 
 ```bash
 terraform destroy -var-file="terraform.dev.tfvars"
 ```
 
-⚠️ **CUIDADO:** Remove TODOS os recursos criados. Digite `yes` para confirmar.
+Digite `yes` quando solicitado.
+
+**⚠️ Cuidado:** Isso remove TODOS os recursos criados!
 
 ---
 
-## 🏗️ Recursos Criados
+## ⚙️ Configuração de Ambientes
 
-Ao executar `terraform apply`, os seguintes recursos são criados na AWS:
+### Desenvolvimento (dev)
 
-### **VPC e Rede**
-- 1 VPC (10.0.0.0/16)
-- 2 Subnets Públicas (10.0.1.0/24, 10.0.2.0/24)
-- 2 Subnets Privadas (10.0.10.0/24, 10.0.11.0/24)
-- 1 Internet Gateway
-- 2 NAT Gateways (um por AZ)
-- Route Tables (públicas e privadas)
+**Arquivo:** `terraform.dev.tfvars`
 
-### **Compute**
-- 1 Instância EC2 Ubuntu 22.04 LTS
-  - Tipo: t3.small (2GB RAM, 2 vCPUs)
-  - IP público atribuído automaticamente
-  - Localizada em subnet pública
-  - Security Group configurado (SSH, HTTP, HTTPS)
+```hcl
+# Identificação
+environment = "dev"
+aws_profile = "ericles-dev"
+aws_region  = "us-east-1"
 
-### **Custos Estimados (us-east-1)**
-- EC2 t3.small: ~$15/mês
-- NAT Gateway (2x): ~$64/mês
-- **Total aproximado: $79/mês**
+# VPC
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.3.0/24", "10.0.4.0/24"]
+availability_zones  = ["us-east-1a", "us-east-1b"]
 
----
+# EC2
+ec2_instance_type = "t3.small"
+ec2_key_name      = "challenge-iac-key"
+enable_monitoring = false
 
-## 🌍 Ambientes
+# Security
+ssh_allowed_ips = []  # Gerenciar manualmente via console
 
-O projeto suporta múltiplos ambientes:
-
-### **Desenvolvimento (dev)**
-```bash
-terraform apply -var-file="terraform.dev.tfvars"
-```
-- Recursos menores
-- NAT Gateway habilitado
-- Monitoramento desabilitado
-
-### **Produção (prod)**
-```bash
-terraform apply -var-file="terraform.prod.tfvars"
-```
-- Recursos maiores
-- Alta disponibilidade
-- Monitoramento habilitado
-- Proteção contra terminação
-
-### **Staging**
-```bash
-terraform apply -var-file="terraform.staging.tfvars"
-```
-- Ambiente de testes pré-produção
-
----
-
-## 🔐 Conectar à Instância EC2
-
-Após o `terraform apply`, use o output para conectar via SSH:
-
-```bash
-# Ver o IP público
-terraform output ec2_public_ip
-
-# Conectar via SSH
-ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
-```
-
----
-
-## 📚 Conceitos Importantes
-
-### **Subnet Pública vs Privada**
-- **Pública:** Tem rota para Internet Gateway, recursos podem ter IP público
-- **Privada:** Sem rota direta para internet, usa NAT Gateway para saída
-
-### **NAT Gateway**
-- Permite que recursos em subnets privadas acessem a internet
-- Necessário para atualizações de sistema, downloads, etc.
-- Tem custo por hora + tráfego de dados
-
-### **Modules**
-- Agrupam recursos relacionados
-- Permitem reutilização de código
-- Facilitam manutenção e organização
-
-### **AMI (Amazon Machine Image)**
-- Imagem do sistema operacional para EC2
-- Cada região tem AMIs diferentes
-- Ubuntu 22.04 LTS: ami-0e2c8caa4b6378d8c (us-east-1)
-
-### **Security Groups (Grupos de Segurança)**
-- **O que é:** Firewall virtual que controla o tráfego de entrada e saída da instância EC2
-- **Onde fica:** Anexado à instância EC2 (não à VPC)
-- **Stateful:** Se você permite tráfego de entrada, a resposta de saída é automaticamente permitida
-
-**Regras:**
-- **Ingress (Entrada):** Controla quem pode ACESSAR sua instância
-  - Exemplo: SSH (porta 22), HTTP (porta 80)
-- **Egress (Saída):** Controla para onde sua instância pode SE CONECTAR
-  - Exemplo: Acesso à internet, banco de dados
-
-**No projeto:**
-```terraform
-# Security Group criado no módulo EC2
-resource "aws_security_group" "ec2" {
-  vpc_id = var.vpc_id
-  
-  # Permite SSH de qualquer IP
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  
-  # Permite HTTP
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  
-  # Permite todo tráfego de saída
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+# Tags
+tags = {
+  Environment = "dev"
+  Project     = "challenge-iac"
+  ManagedBy   = "Terraform"
 }
 ```
 
-**Importante:**
-- ⚠️ `0.0.0.0/0` significa "qualquer IP" - use apenas para HTTP/HTTPS
-- 🔒 Para SSH em produção, restrinja para IPs específicos: `["SEU_IP/32"]`
-- 📊 Um Security Group pode ser usado por várias instâncias
+**Características:**
+- Menor custo (t3.small)
+- Monitoring desabilitado
+- CIDR 10.0.0.0/16
 
-**Diferença: Security Group vs Network ACL**
+### Produção (prod)
 
-| Security Group | Network ACL |
-|---------------|-------------|
-| Nível de instância | Nível de subnet |
-| Stateful (retorno automático) | Stateless (precisa regra de retorno) |
-| Só permite ALLOW | Permite ALLOW e DENY |
-| Avalia todas as regras | Avalia regras em ordem numérica |
+**Arquivo:** `terraform.prod.tfvars`
+
+```hcl
+# Identificação
+environment = "prod"
+aws_profile = "ericles-prod"
+aws_region  = "us-east-1"
+
+# VPC
+vpc_cidr            = "10.1.0.0/16"  # Diferente do dev
+public_subnet_cidrs = ["10.1.1.0/24", "10.1.2.0/24"]
+private_subnet_cidrs = ["10.1.3.0/24", "10.1.4.0/24"]
+availability_zones  = ["us-east-1a", "us-east-1b"]
+
+# EC2
+ec2_instance_type = "t3.medium"  # Maior que dev
+ec2_key_name      = "challenge-iac-key-prod"  # Key diferente
+enable_monitoring = true  # Habilitado em prod
+
+# Security
+ssh_allowed_ips = []  # Gerenciar manualmente via console
+
+# Tags
+tags = {
+  Environment = "prod"
+  Project     = "challenge-iac"
+  ManagedBy   = "Terraform"
+}
+```
+
+**Características:**
+- Maior performance (t3.medium)
+- Monitoring habilitado
+- CIDR 10.1.0.0/16 (evita conflito com dev)
+- Key pair separada
+
+### Comparação Dev vs Prod
+
+| Item | Dev | Prod |
+|------|-----|------|
+| VPC CIDR | 10.0.0.0/16 | 10.1.0.0/16 |
+| Tipo EC2 | t3.small (2GB) | t3.medium (4GB) |
+| Monitoring | Desabilitado | Habilitado |
+| Key Pair | challenge-iac-key | challenge-iac-key-prod |
+| AWS Profile | ericles-dev | ericles-prod |
+
+---
+
+## 🔒 Segurança
+
+### Princípios Implementados
+
+#### 1. Princípio do Menor Privilégio
+
+**EC2:**
+- Aceita HTTP/HTTPS **apenas** do Load Balancer
+- SSH configurável (pode ser totalmente bloqueado)
+- Não exposta diretamente na internet
+
+**Load Balancer:**
+- Aceita tráfego de qualquer origem (público)
+- Encaminha apenas para targets saudáveis
+
+#### 2. Defesa em Profundidade
+
+```
+Camada 1: Internet → Load Balancer (SG: 80/443 público)
+Camada 2: Load Balancer → EC2 (SG: apenas do LB)
+Camada 3: EC2 → Aplicação (configuração da app)
+```
+
+#### 3. Segregação de Rede
+
+- **Subnets Públicas:** Load Balancer e EC2 (temporário)
+- **Subnets Privadas:** Preparadas para banco de dados/backend
+
+### Configuração de SSH
+
+**Três Opções:**
+
+#### Opção 1: Bloqueio Total (Mais Seguro)
+```hcl
+# terraform.dev.tfvars
+ssh_allowed_ips = []
+```
+Resultado: Nenhuma regra SSH criada, acesso apenas via Session Manager.
+
+#### Opção 2: IPs Específicos (Recomendado para Dev)
+```hcl
+# terraform.dev.tfvars
+ssh_allowed_ips = ["203.0.113.0/32", "198.51.100.0/32"]
+```
+Resultado: SSH apenas dos IPs especificados.
+
+#### Opção 3: Gerenciamento Manual via Console (Atual)
+```hcl
+# terraform.dev.tfvars
+ssh_allowed_ips = []
+```
+- Não cria regra no Terraform
+- Adicionar IPs manualmente no Console AWS
+- Terraform não sobrescreve regras manuais
+
+**Para adicionar IP manualmente:**
+1. AWS Console → EC2 → Security Groups
+2. Selecionar Security Group da EC2
+3. Edit Inbound Rules → Add Rule
+4. Type: SSH, Port: 22, Source: My IP
+
+### Security Groups - Regras Detalhadas
+
+#### Load Balancer Security Group
+
+**Inbound:**
+```hcl
+# HTTP de qualquer origem
+Port: 80
+Protocol: TCP
+Source: 0.0.0.0/0
+Description: "Allow HTTP from internet"
+
+# HTTPS de qualquer origem
+Port: 443
+Protocol: TCP
+Source: 0.0.0.0/0
+Description: "Allow HTTPS from internet"
+```
+
+**Outbound:**
+```hcl
+# Todo tráfego permitido
+Protocol: All
+Destination: 0.0.0.0/0
+Description: "Allow all outbound traffic"
+```
+
+#### EC2 Security Group
+
+**Inbound:**
+```hcl
+# HTTP apenas do Load Balancer
+Port: 80
+Protocol: TCP
+Source: sg-XXXXXXXXX (Load Balancer SG)
+Description: "Allow HTTP from Load Balancer only"
+
+# HTTPS apenas do Load Balancer
+Port: 443
+Protocol: TCP
+Source: sg-XXXXXXXXX (Load Balancer SG)
+Description: "Allow HTTPS from Load Balancer only"
+
+# SSH (opcional - dinâmico)
+Port: 22
+Protocol: TCP
+Source: Configurado em ssh_allowed_ips
+Description: "SSH access (if configured)"
+```
+
+**Outbound:**
+```hcl
+# Todo tráfego permitido (para updates, etc)
+Protocol: All
+Destination: 0.0.0.0/0
+Description: "Allow all outbound traffic"
+```
+
+### Por que Egress 0.0.0.0/0?
+
+**Motivos:**
+1. **Evitar Circular Dependency:** LB e EC2 não podem referenciar um ao outro na criação
+2. **Flexibilidade:** EC2 pode fazer updates, instalar pacotes
+3. **Segurança mantida:** Ingress da EC2 ainda é restrito ao LB
+
+**Alternativa mais restrita (futuro):**
+- Usar NAT Gateway nas subnets privadas
+- Mover EC2 para subnet privada
+- Egress apenas via NAT Gateway
 
 ---
 
 ## 🔄 Próximos Passos
 
-**Recursos a serem implementados:**
+### Curto Prazo (Funcionalidades Básicas)
 
-1. ✅ **Security Groups** - Implementado! Controla tráfego da EC2
-2. **Load Balancer** - Distribuir tráfego entre múltiplas instâncias
-3. **Auto Scaling** - Escalar automaticamente com base na demanda
-4. **Bastion Host** - Acesso seguro a recursos privados
-5. **RDS** - Banco de dados gerenciado
-6. **S3 Buckets** - Armazenamento de objetos
-7. **CloudWatch** - Monitoramento e logs
+1. **Instalar Aplicação na EC2**
+   ```bash
+   # Nginx (simples)
+   sudo apt update && sudo apt install -y nginx
+   
+   # Ou API (Node.js, Python, etc)
+   ```
+
+2. **Configurar HTTPS**
+   - Obter certificado SSL no AWS Certificate Manager
+   - Adicionar listener HTTPS (porta 443) no Load Balancer
+   - Redirecionar HTTP → HTTPS
+
+3. **Habilitar Logs do Load Balancer**
+   - Criar bucket S3 para logs
+   - Habilitar access logs no ALB
+
+### Médio Prazo (Escalabilidade)
+
+4. **Auto Scaling Group**
+   - Criar Launch Template com AMI customizada
+   - Configurar Auto Scaling (min 2, max 4 instâncias)
+   - Remover EC2 manual
+
+5. **Mover EC2 para Subnet Privada**
+   - Criar NAT Gateway nas subnets públicas
+   - Mover instâncias para subnets privadas
+   - Acesso apenas via Load Balancer
+
+6. **Adicionar RDS (Banco de Dados)**
+   - Criar subnet group nas subnets privadas
+   - Deploy RDS Multi-AZ
+   - Configurar Security Group (aceita apenas da EC2)
+
+### Longo Prazo (Produção)
+
+7. **Monitoramento e Alertas**
+   - CloudWatch Dashboards
+   - Alarmes (CPU, memória, health checks)
+   - SNS para notificações
+
+8. **CI/CD Pipeline**
+   - GitHub Actions ou CodePipeline
+   - Deploy automático via terraform apply
+   - Testes automatizados
+
+9. **WAF (Web Application Firewall)**
+   - Proteger contra SQL Injection, XSS
+   - Rate limiting
+   - Geo-blocking se necessário
+
+10. **Backup e Disaster Recovery**
+    - Snapshots automáticos da EC2
+    - Backup do RDS
+    - Terraform state em S3 com versionamento
 
 ---
 
-## 🛠️ Troubleshooting
+## 🔧 Troubleshooting
 
-### Vejo 2 VPCs no Console AWS - está correto?
-**Sim! É normal ter 2 VPCs:**
+### Problema 1: Health Check Failing
 
-1. **VPC Default** (criada automaticamente pela AWS)
-   - CIDR geralmente: `172.31.0.0/16`
-   - Criada quando você criou a conta AWS
-   - Vem com subnets em todas as AZs da região
-   - **Pode deletar?** Sim, mas NÃO é recomendado
+**Sintoma:**
+- Target Group mostra EC2 como "Unhealthy"
+- Ao acessar Load Balancer: 503 Service Unavailable
 
-2. **VPC do Projeto** (criada pelo Terraform)
-   - Nome: `vpc-dev`
-   - CIDR: `10.0.0.0/16`
-   - Gerenciada pelo Terraform
-
-**Como identificar a VPC do projeto:**
-```bash
-terraform output vpc_id
-# Resultado: "vpc-0430229f21c7d13be" (exemplo)
-```
-
-Procure este ID no Console AWS para encontrar sua VPC!
-
----
-
-### Erro: "InvalidAMIID.Malformed"
-**Solução:** Verifique se o AMI ID é válido para a região configurada.
-
-### Erro: "No value for required variable"
-**Solução:** Verifique se todas as variáveis estão definidas no arquivo `.tfvars`.
-
-### Erro: "locked provider version"
-**Solução:** Execute `terraform init -upgrade`.
-
-### EC2 sem IP público
-
-### Não consigo conectar via SSH na EC2
-**Possíveis causas:**
-1. **Security Group não configurado:** Verifique se a porta 22 está aberta
-2. **Chave SSH incorreta:** Confirme que está usando a chave certa
-3. **IP público não atribuído:** Verifique se `associate_public_ip_address = true`
+**Causa:**
+- Nenhuma aplicação rodando na porta 80 da EC2
 
 **Solução:**
 ```bash
-# Ver o IP público
-terraform output ec2_public_ip
+# SSH na EC2
+ssh -i ~/.ssh/challenge-iac-key.pem ubuntu@<EC2_IP>
 
-# Verificar Security Group no Console AWS
-# EC2 → Instância → Aba Security → Inbound rules → deve ter porta 22
+# Instalar Nginx
+sudo apt update
+sudo apt install -y nginx
 
-# Testar conexão
-ssh -i ~/.ssh/challenge-iac-key ubuntu@<IP_PUBLICO>
+# Verificar se está rodando
+curl localhost
+
+# Verificar no Target Group (aguarde 30s)
 ```
-**Solução:** Adicione `associate_public_ip_address = true` no recurso EC2.
+
+### Problema 2: Não Consigo Conectar via SSH
+
+**Sintoma:**
+```
+ssh: connect to host X.X.X.X port 22: Connection timed out
+```
+
+**Possíveis Causas:**
+1. `ssh_allowed_ips` está vazio (nenhuma regra SSH criada)
+2. Seu IP não está na lista
+3. Security Group não tem regra SSH
+
+**Solução:**
+```bash
+# Opção 1: Adicionar seu IP no tfvars
+# terraform.dev.tfvars
+ssh_allowed_ips = ["SEU_IP/32"]
+
+# Aplicar mudança
+terraform apply -var-file="terraform.dev.tfvars"
+
+# Opção 2: Adicionar manualmente no console
+# AWS Console → EC2 → Security Groups → Edit Inbound Rules
+# Add Rule: SSH, Port 22, Source: My IP
+```
+
+### Problema 3: Terraform Apply Falha com Circular Dependency
+
+**Sintoma:**
+```
+Error: Cycle: module.loadbalancer, module.ec2
+```
+
+**Causa:**
+- Load Balancer referencia EC2 Security Group
+- EC2 referencia Load Balancer Security Group
+
+**Solução (Já Implementada):**
+- Load Balancer usa egress `0.0.0.0/0`
+- EC2 referencia Load Balancer SG no ingress
+- Não há ciclo porque LB não depende da EC2
+
+### Problema 4: Cannot Access Load Balancer DNS
+
+**Sintoma:**
+- DNS não resolve ou não responde
+
+**Possíveis Causas:**
+1. Load Balancer ainda está sendo criado (aguarde 2-3 minutos)
+2. EC2 está "Unhealthy" (veja Problema 1)
+3. Security Group do LB não permite porta 80
+
+**Solução:**
+```bash
+# Verificar status do Load Balancer
+aws elbv2 describe-load-balancers \
+  --profile ericles-dev \
+  --query 'LoadBalancers[0].State'
+
+# Verificar targets
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw target_group_arn) \
+  --profile ericles-dev
+```
+
+### Problema 5: Terraform State Lock
+
+**Sintoma:**
+```
+Error: Error acquiring the state lock
+```
+
+**Causa:**
+- Outro processo terraform rodando
+- Lock não foi liberado de execução anterior
+
+**Solução:**
+```bash
+# Se backend S3 com DynamoDB
+terraform force-unlock <LOCK_ID>
+
+# Ou aguardar alguns minutos
+```
+
+### Problema 6: Insufficient Permissions
+
+**Sintoma:**
+```
+Error: UnauthorizedOperation: You are not authorized to perform this operation
+```
+
+**Causa:**
+- IAM user/role não tem permissões necessárias
+
+**Permissões Necessárias:**
+- EC2: Full Access
+- VPC: Full Access
+- ELB: Full Access
+- S3: Read/Write (se usar backend S3)
+
+**Solução:**
+- Adicionar policy `PowerUserAccess` ou policies específicas no IAM
+
+### Problema 7: Key Pair Not Found
+
+**Sintoma:**
+```
+Error: InvalidKeyPair.NotFound: The key pair 'challenge-iac-key' does not exist
+```
+
+**Solução:**
+```bash
+# Criar key pair
+aws ec2 create-key-pair \
+  --key-name challenge-iac-key \
+  --profile ericles-dev \
+  --region us-east-1 \
+  --query 'KeyMaterial' \
+  --output text > ~/.ssh/challenge-iac-key.pem
+
+chmod 400 ~/.ssh/challenge-iac-key.pem
+```
 
 ---
 
-## 📖 Referências
+## 📚 Recursos Adicionais
+
+### Documentação Oficial
 
 - [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-- [Terraform VPC Module](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest)
-- [AWS VPC Documentation](https://docs.aws.amazon.com/vpc/)
-- [AWS EC2 Documentation](https://docs.aws.amazon.com/ec2/)
+- [AWS VPC](https://docs.aws.amazon.com/vpc/)
+- [AWS EC2](https://docs.aws.amazon.com/ec2/)
+- [AWS Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/)
+
+### Comandos Úteis
+
+```bash
+# Ver todos os outputs
+terraform output
+
+# Ver output específico
+terraform output lb_dns_name
+
+# Ver output sem formatação (para scripts)
+terraform output -raw ec2_public_ip
+
+# Formatar código
+terraform fmt -recursive
+
+# Ver state atual
+terraform show
+
+# Listar recursos no state
+terraform state list
+
+# Ver detalhes de um recurso
+terraform state show module.ec2.aws_instance.main
+
+# Importar recurso existente
+terraform import module.vpc.aws_vpc.main vpc-xxxxxxxxx
+
+# Atualizar providers
+terraform init -upgrade
+```
+
+### Custos Estimados (us-east-1)
+
+**Desenvolvimento:**
+- EC2 t3.small: ~$15/mês
+- Application Load Balancer: ~$20/mês
+- Data Transfer: Variável
+- **Total aproximado: $35-40/mês**
+
+**Produção:**
+- EC2 t3.medium: ~$30/mês
+- Application Load Balancer: ~$20/mês
+- Data Transfer: Variável
+- Monitoring: ~$5/mês
+- **Total aproximado: $55-65/mês**
+
+**⚠️ Nota:** Valores aproximados. Use AWS Cost Calculator para estimativas precisas.
 
 ---
 
-## 👤 Autor
+## 👥 Contribuindo
 
-**Ericles Miller**
+Se quiser melhorar este projeto:
 
-Projeto desenvolvido como parte do desafio de Infraestrutura como Código (IaC).
+1. Fork o repositório
+2. Crie uma branch: `git checkout -b feature/nova-feature`
+3. Commit suas mudanças: `git commit -m 'Add nova feature'`
+4. Push para a branch: `git push origin feature/nova-feature`
+5. Abra um Pull Request
 
 ---
 
 ## 📄 Licença
 
-Este projeto é apenas para fins educacionais.
-![1769099923501](image/README/1769099923501.png)![1769099934426](image/README/1769099934426.png)![1769099943289](image/README/1769099943289.png)![1769099972574](image/README/1769099972574.png)
+Este projeto é de código aberto e está disponível sob a licença MIT.
+
+---
+
+## ✉️ Contato
+
+- **GitHub:** [@Ericles-Miller](https://github.com/Ericles-Miller)
+- **Projeto:** [Challenge_IAC](https://github.com/Ericles-Miller/Challenge_IAC)
+
+---
+
+**Última atualização:** 22 de janeiro de 2026
