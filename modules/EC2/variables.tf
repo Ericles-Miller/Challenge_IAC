@@ -55,3 +55,25 @@ variable "tags" {
   description = "Tags adicionais"
   default     = {}
 }
+
+# ==================================================
+# VARIÁVEIS DE CRIPTOGRAFIA EBS
+# ==================================================
+
+variable "enable_ebs_encryption" {
+  type        = bool
+  description = "Habilitar criptografia nos volumes EBS"
+  default     = true
+}
+
+variable "ebs_volume_size" {
+  type        = number
+  description = "Tamanho do volume raiz em GB"
+  default     = 30
+}
+
+variable "ebs_volume_type" {
+  type        = string
+  description = "Tipo do volume EBS (gp3, gp2, io1, io2)"
+  default     = "gp3"
+}

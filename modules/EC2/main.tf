@@ -6,7 +6,6 @@ resource "aws_security_group" "ec2" {
   description = "Security Group para instancia EC2"
   vpc_id      = var.vpc_id
 
-  # Regra de entrada: SSH (porta 22) - Gerenciada manualmente no console AWS
   # Se ssh_allowed_ips estiver vazio, essa regra não será criada
   dynamic "ingress" {
     for_each = length(var.ssh_allowed_ips) > 0 ? [1] : []
@@ -66,6 +65,22 @@ resource "aws_instance" "main" {
   
   # Associa o Security Group criado acima
   vpc_security_group_ids = [aws_security_group.ec2.id]
+  
+  # ==================================================
+  # CRIPTOGRAFIA EBS - Volume Raiz
+  # ==================================================
+  root_block_device {
+    volume_size           = var.ebs_volume_size       # Tamanho do disco (GB)
+    volume_type           = var.ebs_volume_type       # Tipo: gp3 (SSD rápido)
+    encrypted             = var.enable_ebs_encryption # CRIPTOGRAFIA HABILITADA
+    delete_on_termination = true                      # Deletar ao terminar EC2
+    
+    tags = {
+      Name        = "${var.instance_name}-root-volume"
+      Environment = var.environment
+      Encrypted   = var.enable_ebs_encryption ? "true" : "false"
+    }
+  }
   
   tags = {
     Name        = var.instance_name
