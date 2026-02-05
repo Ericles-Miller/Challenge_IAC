@@ -772,6 +772,137 @@ Description: "Allow all outbound traffic"
 - Mover EC2 para subnet privada
 - Egress apenas via NAT Gateway
 
+### Gerenciamento de Secrets e Credenciais
+
+O projeto implementa **boas práticas de segurança** para gerenciamento de informações sensíveis, mantendo credenciais **fora do código Terraform**:
+
+#### 1. Variáveis Sensíveis
+
+Todas as informações sensíveis são marcadas como `sensitive = true` no Terraform:
+
+```hcl
+# variables.tf
+variable "db_password" {
+  description = "Database password"
+  type        = string
+  sensitive   = true  # ← Não aparece em logs/outputs
+}
+```
+
+#### 2. Arquivos .tfvars (Gitignored)
+
+Valores sensíveis ficam em arquivos `.tfvars` que **não são commitados** no Git:
+
+```bash
+# .gitignore
+*.tfvars
+!terraform.example.tfvars
+```
+
+**Estrutura:**
+```
+terraform.dev.tfvars      # ← Gitignored (valores reais)
+terraform.prod.tfvars     # ← Gitignored (valores reais)
+terraform.example.tfvars  # ← Commitado (template sem valores)
+```
+
+#### 3. AWS Profiles (Credenciais AWS)
+
+Credenciais AWS são gerenciadas via **AWS CLI profiles**, nunca no código:
+
+```bash
+# ~/.aws/credentials
+[ericles-dev]
+aws_access_key_id = AKIA...
+aws_secret_access_key = ...
+
+[ericles-prod]
+aws_access_key_id = AKIA...
+aws_secret_access_key = ...
+```
+
+**Uso no Terraform:**
+```hcl
+# provider.tf
+provider "aws" {
+  profile = var.aws_profile  # "ericles-dev" ou "ericles-prod"
+  region  = var.aws_region
+}
+```
+
+#### 4. IAM Roles (Permissões EC2)
+
+EC2 utiliza **IAM Instance Profile** ao invés de credenciais hardcoded:
+
+```hcl
+# EC2 tem IAM role anexado
+resource "aws_instance" "main" {
+  iam_instance_profile = aws_iam_instance_profile.ec2.name
+  # Não precisa de access keys!
+}
+```
+
+**Benefícios:**
+- ✅ Credenciais rotacionadas automaticamente pela AWS
+- ✅ Sem risco de vazar keys no código
+- ✅ Controle granular via IAM policies
+
+#### 5. Variáveis de Ambiente (Aplicação)
+
+Para secrets da aplicação (JWT, API keys), use variáveis de ambiente na EC2:
+
+```bash
+# Na EC2, criar arquivo .env
+cat > /home/ubuntu/app/.env <<EOF
+JWT_SECRET=seu-jwt-secret-aqui
+API_KEY=sua-api-key-aqui
+NODE_ENV=production
+EOF
+
+# Não commitar .env no Git
+echo ".env" >> .gitignore
+```
+
+#### 6. Alternativas para Produção
+
+Para ambientes de produção, considere:
+
+**AWS Secrets Manager:**
+- Rotação automática de secrets
+- Auditoria completa (CloudTrail)
+- Integração com RDS
+
+**AWS Systems Manager Parameter Store:**
+- Mais barato que Secrets Manager
+- Ótimo para configurações não-rotacionáveis
+- Suporta criptografia com KMS
+
+**Exemplo de uso (futuro):**
+```hcl
+# Criar secret no AWS Secrets Manager
+resource "aws_secretsmanager_secret" "api_keys" {
+  name = "${var.environment}-api-keys"
+}
+
+# Na EC2, ler via AWS SDK
+aws secretsmanager get-secret-value \
+  --secret-id dev-api-keys \
+  --query SecretString
+```
+
+#### 7. Checklist de Segurança
+
+- [x] Credenciais AWS via profiles (não no código)
+- [x] Variáveis sensíveis marcadas como `sensitive = true`
+- [x] Arquivos `.tfvars` no `.gitignore`
+- [x] EC2 usa IAM roles (não access keys)
+- [x] SSH keys não commitadas no Git
+- [x] Security Groups restritivos
+- [x] Criptografia EBS habilitada
+- [ ] Secrets Manager (implementar se necessário)
+- [ ] CloudTrail habilitado (auditoria)
+- [ ] MFA em contas AWS
+
 ---
 
 ## 🔄 Próximos Passos
